@@ -1,0 +1,25 @@
+name: Build PyMOL Plugin
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Create Zip Archive
+      run: |
+        zip -r pymol_colab.zip pymol_colab/
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: pymol_colab_plugin
+        path: pymol_colab.zip
