@@ -1,14 +1,33 @@
 import random
 import string
 import threading
-from pymol.qt import QtWidgets, QtCore
+
+try:
+    from PyQt5 import QtWidgets, QtCore
+    Signal = QtCore.pyqtSignal
+    Slot = QtCore.pyqtSlot
+except ImportError:
+    try:
+        from PyQt6 import QtWidgets, QtCore
+        Signal = QtCore.pyqtSignal
+        Slot = QtCore.pyqtSlot
+    except ImportError:
+        try:
+            from PySide2 import QtWidgets, QtCore
+            Signal = QtCore.Signal
+            Slot = QtCore.Slot
+        except ImportError:
+            from PySide6 import QtWidgets, QtCore
+            Signal = QtCore.Signal
+            Slot = QtCore.Slot
+
 from . import network, core
 
 class CollabGUI(QtWidgets.QWidget):
     # Señales para comunicar los hilos de red con el hilo principal de la GUI (PyQt)
-    sig_status_update = QtCore.Signal(str)
-    sig_client_connected = QtCore.Signal(object, object)
-    sig_message_received = QtCore.Signal(dict, bytes, object)
+    sig_status_update = Signal(str)
+    sig_client_connected = Signal(object, object)
+    sig_message_received = Signal(dict, bytes, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +122,7 @@ class CollabGUI(QtWidgets.QWidget):
         
         threading.Thread(target=_connect, daemon=True).start()
 
-    @QtCore.Slot(str)
+    @Slot(str)
     def update_status_label(self, msg):
         self.lbl_status.setText(msg)
 
@@ -115,7 +134,7 @@ class CollabGUI(QtWidgets.QWidget):
         self.sig_message_received.emit(msg, bin_data, sock)
 
     # --- Handlers de la GUI (Corren en el hilo principal) ---
-    @QtCore.Slot(object, object)
+    @Slot(object, object)
     def _on_client_connected_gui(self, client_sock, addr):
         self.sig_status_update.emit(f"Cliente conectado: {addr[0]}")
         # Obtener la sesión actual de PyMOL (solo Host hace esto)
@@ -123,7 +142,7 @@ class CollabGUI(QtWidgets.QWidget):
         # Enviar la sesión al nuevo cliente
         self.net.send_msg(client_sock, "session_state", binary_data=session_bytes)
 
-    @QtCore.Slot(dict, bytes, object)
+    @Slot(dict, bytes, object)
     def _on_message_gui(self, msg, bin_data, sock):
         msg_type = msg.get("type")
         
