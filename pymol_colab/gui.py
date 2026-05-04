@@ -115,9 +115,16 @@ class ConnectionDialog(QtWidgets.QDialog):
         self.close()
 
 class CollabWizard(Wizard):
-    def __init__(self, manager):
+    def __init__(self, manager=None):
         super().__init__()
-        self.manager = manager
+        global _manager
+        self.manager = manager if manager else _manager
+
+    def __getstate__(self):
+        return {}
+
+    def __setstate__(self, state):
+        pass
 
     def get_prompt(self):
         # El texto que aparece arriba en el visor OpenGL
@@ -171,6 +178,7 @@ class CollabManager(QtCore.QObject):
         self.role = "none"
         self.status_text = "Desconectado"
         self.last_objects = None
+        self.last_seles = None
         
         self.camera_timer = QtCore.QTimer(self)
         self.camera_timer.timeout.connect(self.sync_camera_loop)
@@ -235,7 +243,8 @@ class CollabManager(QtCore.QObject):
         self.role = role
         if role == "host":
             self.camera_timer.start(100)
-            self.last_objects = cmd.get_names('objects')
+            self.last_objects = set(cmd.get_names('objects'))
+            self.last_seles = core.get_selections_state()
             self.object_timer.start(1000)
             core.start_command_logging()
             self.command_timer.start(100)
@@ -277,10 +286,15 @@ class CollabManager(QtCore.QObject):
     @Slot()
     def sync_objects_loop(self):
         if self.net.is_host and self.net.is_connected:
-            current_objects = cmd.get_names('objects')
+            current_objects = set(cmd.get_names('objects'))
             if current_objects != self.last_objects:
                 self.last_objects = current_objects
                 self.force_sync()
+                
+            current_seles = core.get_selections_state()
+            if current_seles != self.last_seles:
+                self.last_seles = current_seles
+                self.net.broadcast(protocol.MSG_SELECTIONS, payload=current_seles)
 
     @Slot()
     def sync_commands_loop(self):
@@ -339,6 +353,11 @@ class CollabManager(QtCore.QObject):
                     if self.net.is_host:
                         # Re-enviar a todos los demas clientes
                         self.net.broadcast(protocol.MSG_COMMAND, payload={"cmd": cmd_str})
+                        
+            elif msg_type == protocol.MSG_SELECTIONS:
+                if not self.net.is_host:
+                    seles = msg.get("payload", {})
+                    core.apply_selections_state(seles)
         except Exception as e:
             self.sig_status_update.emit(f"Error Cliente: {str(e)}")
 

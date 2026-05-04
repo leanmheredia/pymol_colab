@@ -61,6 +61,45 @@ def set_camera_view(view_matrix):
     """
     cmd.set_view(view_matrix, quiet=1)
 
+def get_selections_state():
+    """Devuelve un diccionario de selecciones y sus átomos (modelo, index)"""
+    seles = cmd.get_names('selections')
+    out = {}
+    for s in seles:
+        if s.startswith("_"): continue
+        try:
+            out[s] = cmd.index(s)
+        except Exception:
+            pass
+    return out
+
+def apply_selections_state(state_dict):
+    """Aplica el estado de selecciones recibidas del Host."""
+    for sele_name, atoms in state_dict.items():
+        sele_final = f"{sele_name}_host"
+        if not atoms:
+            cmd.select(sele_final, "none")
+            continue
+            
+        by_obj = {}
+        for obj, idx in atoms:
+            by_obj.setdefault(obj, []).append(str(idx))
+            
+        parts = []
+        for obj, idxs in by_obj.items():
+            parts.append(f"({obj} and index {'+'.join(idxs)})")
+            
+        sele_str = " or ".join(parts)
+        
+        cmd.log_close()
+        try:
+            cmd.select(sele_final, sele_str)
+        except Exception:
+            pass
+        finally:
+            if _log_file_path:
+                cmd.log_open(_log_file_path)
+
 _log_file_path = None
 _log_file = None
 
@@ -138,11 +177,16 @@ def stop_command_logging():
         _log_file_path = None
 
 def execute_command(command_str):
-    """Ejecuta un comando recibido de la red pausando el loop."""
+    """Ejecuta un comando recibido de la red pausando el loop y silenciando el output local."""
     global _ignore_next_commands
     cmd_clean = command_str.strip()
     _ignore_next_commands.add(cmd_clean)
     try:
-        cmd.do(command_str)
+        if cmd_clean.startswith("cmd.") or cmd_clean.startswith("util."):
+            import pymol
+            from pymol import util
+            exec(cmd_clean, {'cmd': cmd, 'util': util, 'pymol': pymol})
+        else:
+            cmd.do(command_str)
     except Exception:
         pass
