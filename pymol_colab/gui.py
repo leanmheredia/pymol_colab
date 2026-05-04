@@ -178,6 +178,9 @@ class CollabManager(QtCore.QObject):
         self.object_timer = QtCore.QTimer(self)
         self.object_timer.timeout.connect(self.sync_objects_loop)
         
+        self.command_timer = QtCore.QTimer(self)
+        self.command_timer.timeout.connect(self.sync_commands_loop)
+        
         self.sig_status_update.connect(self.update_status_label)
         self.sig_client_connected.connect(self._on_client_connected_gui)
         self.sig_message_received.connect(self._on_message_gui)
@@ -232,15 +235,21 @@ class CollabManager(QtCore.QObject):
         self.role = role
         if role == "host":
             self.camera_timer.start(100)
-            self.last_objects = cmd.get_names('public')
-            self.object_timer.start(1000) # Auto-sync cada 1s si cambian los objetos
+            self.last_objects = cmd.get_names('objects')
+            self.object_timer.start(1000)
+            core.start_command_logging()
+            self.command_timer.start(100)
         elif role == "viewer":
             self.is_following = True
             self.camera_timer.stop()
             self.object_timer.stop()
+            core.start_command_logging()
+            self.command_timer.start(100)
         else:
             self.camera_timer.stop()
             self.object_timer.stop()
+            self.command_timer.stop()
+            core.stop_command_logging()
         self._refresh_wizard()
 
     def toggle_camera_mode(self):
@@ -268,10 +277,17 @@ class CollabManager(QtCore.QObject):
     @Slot()
     def sync_objects_loop(self):
         if self.net.is_host and self.net.is_connected:
-            current_objects = cmd.get_names('public')
+            current_objects = cmd.get_names('objects')
             if current_objects != self.last_objects:
                 self.last_objects = current_objects
                 self.force_sync()
+
+    @Slot()
+    def sync_commands_loop(self):
+        if self.net.is_connected:
+            cmds = core.get_new_commands()
+            for c in cmds:
+                self.net.broadcast(protocol.MSG_COMMAND, payload={"cmd": c})
 
     def _net_client_connected(self, client_sock, addr):
         self.sig_client_connected.emit(client_sock, addr)
@@ -315,6 +331,14 @@ class CollabManager(QtCore.QObject):
                     view = msg.get("payload")
                     if view:
                         core.set_camera_view(tuple(view))
+                        
+            elif msg_type == protocol.MSG_COMMAND:
+                cmd_str = msg.get("payload", {}).get("cmd")
+                if cmd_str:
+                    core.execute_command(cmd_str)
+                    if self.net.is_host:
+                        # Re-enviar a todos los demas clientes
+                        self.net.broadcast(protocol.MSG_COMMAND, payload={"cmd": cmd_str})
         except Exception as e:
             self.sig_status_update.emit(f"Error Cliente: {str(e)}")
 

@@ -7,6 +7,7 @@ MSG_HANDSHAKE_OK = "handshake_ok"
 MSG_HANDSHAKE_FAIL = "handshake_fail"
 MSG_SESSION_STATE = "session_state"
 MSG_CAMERA_VIEW = "camera_view"
+MSG_COMMAND = "command"
 
 def send_message(sock, msg_type, payload=None, binary_data=None):
     """
