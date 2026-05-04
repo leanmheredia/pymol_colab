@@ -50,7 +50,10 @@ def get_camera_view():
     """
     Obtiene la matriz de vista actual (cámara).
     """
-    return cmd.get_view()
+    v = cmd.get_view()
+    if v:
+        return tuple(round(x, 4) for x in v)
+    return v
 
 def set_camera_view(view_matrix):
     """
@@ -71,32 +74,54 @@ def start_command_logging():
         _log_file = open(_log_file_path, 'r')
         _log_file.seek(0, 2)
 
+_ignore_next_commands = set()
+
 def get_new_commands():
     """Lee y devuelve los nuevos comandos de PyMOL ejecutados por el usuario local."""
-    global _log_file
+    global _log_file, _ignore_next_commands
     if _log_file is None:
         return []
+    
     lines = _log_file.readlines()
     
-    ignore_prefixes = ("turn ", "move ", "zoom ", "orient ", "view ", "set_view")
-    cmds = []
-    skipping_multiline = False
-    
+    # Reconstruir comandos multilinea
+    full_commands = []
+    current_cmd = ""
     for line in lines:
         line_stripped = line.strip()
         if not line_stripped: continue
         
-        if skipping_multiline:
-            if not line_stripped.endswith('\\'):
-                skipping_multiline = False
+        if line_stripped.endswith('\\'):
+            current_cmd += line_stripped[:-1] + " "
+        else:
+            current_cmd += line_stripped
+            full_commands.append(current_cmd)
+            current_cmd = ""
+            
+    # Solo sincronizar comandos explicitos de representacion/estructura
+    allowed_base = [
+        "color", "show", "hide", "enable", "disable", "select", 
+        "delete", "remove", "alter", "cartoon", "sphere", "surface", 
+        "ribbon", "bg_color", "space", "label", "create", 
+        "extract", "symexp", "spectrum", "util."
+    ]
+    allowed_prefixes = tuple(allowed_base + ["cmd." + b for b in allowed_base] + ["set ", "cmd.set("])
+    
+    cmds = []
+    for cmd_str in full_commands:
+        cmd_clean = cmd_str.strip()
+        
+        if cmd_clean in _ignore_next_commands:
+            _ignore_next_commands.remove(cmd_clean)
             continue
             
-        if any(line_stripped.startswith(p) for p in ignore_prefixes):
-            if line_stripped.endswith('\\'):
-                skipping_multiline = True
-            continue
+        if any(cmd_clean.startswith(p) for p in allowed_prefixes):
+            cmds.append(cmd_clean)
             
-        cmds.append(line_stripped)
+    # Evitar crecimiento infinito si hay comandos rotos
+    if len(_ignore_next_commands) > 100:
+        _ignore_next_commands.clear()
+        
     return cmds
 
 def stop_command_logging():
@@ -113,12 +138,11 @@ def stop_command_logging():
         _log_file_path = None
 
 def execute_command(command_str):
-    """Ejecuta un comando recibido de la red pausando temporalmente el log para evitar loops infinitos."""
-    cmd.log_close()
+    """Ejecuta un comando recibido de la red pausando el loop."""
+    global _ignore_next_commands
+    cmd_clean = command_str.strip()
+    _ignore_next_commands.add(cmd_clean)
     try:
         cmd.do(command_str)
     except Exception:
         pass
-    finally:
-        if _log_file_path:
-            cmd.log_open(_log_file_path)
