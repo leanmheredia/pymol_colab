@@ -56,9 +56,10 @@ class CollabNetwork:
         header = json.loads(header_data.decode('utf-8'))
 
         bin_len_data = recvall(4)
+        if not bin_len_data: return header, b''
         bin_len = struct.unpack(">I", bin_len_data)[0]
         
-        binary_data = None
+        binary_data = b''
         if bin_len > 0:
             binary_data = recvall(bin_len)
 
@@ -89,11 +90,21 @@ class CollabNetwork:
             if "on_client_connected" in self.callbacks:
                 self.callbacks["on_client_connected"](client_sock, addr)
             
-            while True:
-                data, bin_data = self.recv_msg(client_sock)
-                if not data: break
-                if "on_message" in self.callbacks:
-                    self.callbacks["on_message"](data, bin_data, client_sock)
+            try:
+                while True:
+                    data, bin_data = self.recv_msg(client_sock)
+                    if not data: break
+                    if "on_message" in self.callbacks:
+                        self.callbacks["on_message"](data, bin_data, client_sock)
+            finally:
+                if client_sock in self.clients:
+                    self.clients.remove(client_sock)
+                try:
+                    client_sock.close()
+                except:
+                    pass
+                if "on_client_disconnected" in self.callbacks:
+                    self.callbacks["on_client_disconnected"](client_sock)
         else:
             self.send_msg(client_sock, "handshake_fail")
             client_sock.close()
@@ -117,16 +128,22 @@ class CollabNetwork:
         return False
 
     def _client_loop(self):
-        while self.is_connected:
-            try:
+        reason = ""
+        try:
+            while self.is_connected:
                 msg, bin_data = self.recv_msg(self.sock)
-                if not msg: break
+                if not msg: 
+                    reason = "Servidor cerró la conexión."
+                    break
                 
                 if "on_message" in self.callbacks:
                     self.callbacks["on_message"](msg, bin_data, self.sock)
-            except:
-                break
-        self.disconnect()
+        except Exception as e:
+            reason = str(e)
+        finally:
+            self.disconnect()
+            if "on_disconnected" in self.callbacks:
+                self.callbacks["on_disconnected"](reason)
 
     def broadcast(self, msg_type, payload=None, binary_data=None):
         if self.is_host:
@@ -147,3 +164,9 @@ class CollabNetwork:
             except:
                 pass
             self.sock = None
+        for c in self.clients:
+            try:
+                c.close()
+            except:
+                pass
+        self.clients.clear()

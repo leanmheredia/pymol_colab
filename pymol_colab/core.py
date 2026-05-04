@@ -1,6 +1,7 @@
 from pymol import cmd
 import tempfile
 import os
+import threading
 
 def get_session_bytes():
     """
@@ -10,13 +11,26 @@ def get_session_bytes():
     with tempfile.NamedTemporaryFile(suffix=".pse", delete=False) as tmp:
         tmp_path = tmp.name
     
-    # cmd.save() bloquea el hilo principal brevemente mientras guarda
-    cmd.save(tmp_path)
+    import time
     
-    with open(tmp_path, "rb") as f:
-        data = f.read()
+    cmd.save(tmp_path)
+    cmd.sync()  # Pide a PyMOL que termine las tareas pendientes
+    
+    # Espera activa hasta que PyMOL escriba el archivo
+    for _ in range(20):
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 100:
+            break
+        time.sleep(0.1)
+    
+    try:
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+    except Exception:
+        data = b''
         
-    os.remove(tmp_path)
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+        
     return data
 
 def load_session_bytes(data):
@@ -27,8 +41,10 @@ def load_session_bytes(data):
         tmp.write(data)
         tmp_path = tmp.name
         
-    cmd.load(tmp_path)
-    os.remove(tmp_path)
+    cmd.load(tmp_path, quiet=1)
+    cmd.sync()
+    # PyMOL lee el archivo de manera asíncrona, así que esperamos unos segundos antes de borrarlo
+    threading.Timer(5.0, lambda: os.remove(tmp_path) if os.path.exists(tmp_path) else None).start()
 
 def get_camera_view():
     """
