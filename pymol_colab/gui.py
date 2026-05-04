@@ -23,7 +23,7 @@ except ImportError:
 
 from pymol import cmd
 from pymol.wizard import Wizard
-from . import network, core
+from . import network, core, protocol
 
 class ConnectionDialog(QtWidgets.QDialog):
     def __init__(self, collab_manager, parent=None):
@@ -252,7 +252,7 @@ class CollabManager(QtCore.QObject):
             self.sig_status_update.emit("Generando sesion...")
             session_bytes = core.get_session_bytes()
             if session_bytes:
-                self.net.broadcast("session_state", binary_data=session_bytes)
+                self.net.broadcast(protocol.MSG_SESSION_STATE, binary_data=session_bytes)
                 self.sig_status_update.emit("Cambios enviados.")
             else:
                 self.sig_status_update.emit("Error generando sesion.")
@@ -263,7 +263,7 @@ class CollabManager(QtCore.QObject):
             view = core.get_camera_view()
             if view != self.last_view:
                 self.last_view = view
-                self.net.broadcast("camera_view", payload=list(view))
+                self.net.broadcast(protocol.MSG_CAMERA_VIEW, payload=list(view))
 
     @Slot()
     def sync_objects_loop(self):
@@ -295,7 +295,7 @@ class CollabManager(QtCore.QObject):
                 return
                 
             self.sig_status_update.emit(f"Enviando sesion...")
-            self.net.send_msg(client_sock, "session_state", binary_data=session_bytes)
+            self.net.send_msg(client_sock, protocol.MSG_SESSION_STATE, binary_data=session_bytes)
             self.sig_status_update.emit("Sesion enviada.")
         except Exception as e:
             self.sig_status_update.emit(f"Error Host: {str(e)}")
@@ -305,12 +305,12 @@ class CollabManager(QtCore.QObject):
         try:
             msg_type = msg.get("type")
             
-            if msg_type == "session_state" and bin_data:
+            if msg_type == protocol.MSG_SESSION_STATE and bin_data:
                 self.sig_status_update.emit(f"Cargando sesion...")
                 core.load_session_bytes(bin_data)
                 self.sig_status_update.emit("Sesion sincronizada.")
                 
-            elif msg_type == "camera_view":
+            elif msg_type == protocol.MSG_CAMERA_VIEW:
                 if not self.net.is_host and self.is_following:
                     view = msg.get("payload")
                     if view:
